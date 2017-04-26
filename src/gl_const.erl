@@ -30,6 +30,9 @@ gl_triangles() ->
 gl_quads() ->
   ?GL_QUADS.
 
+gl_line_strip() ->
+  ?GL_LINE_STRIP.
+
 gl_projection() ->
   ?GL_PROJECTION.
 
