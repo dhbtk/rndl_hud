@@ -7,6 +7,7 @@ defmodule RNDL.OBDII do
 
   def init(:ok) do
     :timer.send_interval(50, self(), :update)
+#    {:ok, :stopped}
   end
 
   def stop do
@@ -23,8 +24,9 @@ defmodule RNDL.OBDII do
 
   def handle_info(:update, timer) do
     %{rpm: rpm} = RNDL.StateServer.get_state()
-    rpm = if rpm >= 7000, do: 0, else: rpm + 50
+    rpm = if rpm >= 7000, do: 0, else: rpm + 77
     RNDL.StateServer.set(:rpm, rpm)
+    RNDL.StateServer.set(:speed, (rpm/7000)*150)
     {:noreply, timer}
   end
 
