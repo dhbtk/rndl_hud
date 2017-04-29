@@ -128,12 +128,6 @@ defmodule RNDL.UIServer do
         |> String.pad_leading(4, "0")
         |> draw_number(0, 190, 20, own_state)
 
-    :gl.'begin'(:gl_const.gl_triangles)
-    :gl.color3f(1.0, 1.0, 0.5)
-    :gl.vertex2f(100, 10)
-    :gl.vertex2f(100 + percent*360, 10)
-    :gl.vertex2f(100 + percent*360, 30)
-    :gl.'end'()
     :ok
   end
 
@@ -143,7 +137,7 @@ defmodule RNDL.UIServer do
 
   defp draw_horizontal_blocks(max_x, min_x) do
     width = max_x - min_x
-    colored_width = if width > 10, do: 10, else: width
+    colored_width = min(10, width)
 
     {r, g, b} = color_for_block(@rpm_width, min_x)
     :gl.color3f(r, g, b)
