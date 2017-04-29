@@ -5,6 +5,13 @@ defmodule RNDL.UIServer do
   @size {480, 320}
 
   @max_rpm 7000
+  @rpm_width 300
+  @step1 2500
+  @step2 4000
+  @step3 5750
+  @color1 {1, 0.64705884, 0}
+  @color2 {1, 0.27058825, 0}
+  @color3 {1, 0, 0}
 
   def start_link do
     GenServer.start_link(__MODULE__, :ok, name: RNDL.UIServer)
@@ -15,7 +22,7 @@ defmodule RNDL.UIServer do
     frame = :wxFrame.new(wx, :wx_const.wx_id_any, @title, [{:size, @size}])
     :wxWindow.connect(frame, :close_window)
     :wxFrame.show(frame)
-    # :wxFrame.showFullScreen(frame, true)
+#     :wxFrame.showFullScreen(frame, true)
 
     opts = [{:size, @size}]
     gl_attrib = [{:attribList, [:wx_const.wx_gl_rgba,
@@ -32,8 +39,9 @@ defmodule RNDL.UIServer do
     setup_gl(canvas)
 
     # Periodically send a message to trigger a redraw of the scene
+    textures = load_textures()
     timer = :timer.send_interval(50, self(), :update)
-    {:ok, %{frame: frame, canvas: canvas, timer: timer}}
+    {:ok, %{frame: frame, canvas: canvas, timer: timer, textures: textures}}
   end
 
   def terminate(_reason, state) do
@@ -66,72 +74,163 @@ defmodule RNDL.UIServer do
     :ok
   end
 
-  defp draw() do
+  def load_textures() do
+    Enum.map(0..9, fn i ->
+        load_texture_by_file("res/images/7segment/#{i}.png")
+     end)
+  end
+
+  # as imgs são 90x122 mas arredondamos para 128x128
+  def load_texture_by_file(file) do
+    img = :wxImage.new(file)
+    tex = :gl_const.load_texture_by_image(img)
+    IO.inspect tex
+    tex
+  end
+
+  defp draw(own_state) do
     state = RNDL.StateServer.get_state()
     percent = (state.rpm / @max_rpm)
     :gl.clear(Bitwise.bor(:gl_const.gl_color_buffer_bit, :gl_const.gl_depth_buffer_bit))
 
-    max_bars = round((@max_rpm/1000) * 7)
-    max_angle = 120
-    min_angle = 60
-    angle_span = min_angle / max_bars
-    x_radius = 460
-    y_radius = 115
-    x_inner_radius = x_radius * 0.9
-    y_inner_radius = y_radius * 0.9
-    x_center = 240
-    y_center = 170
+    dist = round(percent*@rpm_width)
 
-    # wrapper line
-    :gl.'begin'(:gl_const.gl_line_strip)
-    :gl.color3f(1.0, 1.0, 1.0)
-    Enum.each((0..max_bars), fn i ->
-      left_rad = ((max_angle - angle_span * i)*:math.pi())/180
-      x = :math.cos(left_rad) * x_inner_radius + x_center
-      y = y_center + :math.sin(left_rad) * y_inner_radius
-      :gl.vertex2f(x, y)
-    end)
+    :gl.'begin'(:gl_const.gl_quads)
+    :gl.color3f(1.0, 1.0, 0.5)
+    draw_horizontal_blocks(dist, 0)
     :gl.'end'()
 
-    bars = round(percent * max_bars) - 1
-    Enum.each(0..bars, fn i ->
-      left_rad = ((max_angle - angle_span * i)*:math.pi())/180
-      right_rad = ((max_angle - angle_span * (i + 1))*:math.pi())/180
-      # bottom: inner_radius
-      # top: radius
-      x_bl = :math.cos(left_rad) * x_inner_radius + x_center
-      y_bl = :math.sin(left_rad) * y_inner_radius + y_center
-      x_tl = :math.cos(left_rad) * x_radius + x_center
-      y_tl = :math.sin(left_rad) * y_radius + y_center
-      x_tr = :math.cos(right_rad) * x_radius + x_center
-      y_tr = :math.sin(right_rad) * y_radius + y_center
-      x_br = :math.cos(right_rad) * x_inner_radius + x_center
-      y_br = :math.sin(right_rad) * y_inner_radius + y_center
+    # white bar
+    :gl.'begin'(:gl_const.gl_quads)
+    :gl.color3f(1.0, 1.0, 1.0)
+    :gl.vertex2f(0, 217)
+    :gl.vertex2f(@rpm_width, 217)
+    :gl.vertex2f(@rpm_width, 215)
+    :gl.vertex2f(0, 215)
+    :gl.'end'()
 
-      :gl.'begin'(:gl_const.gl_quads)
-      if rem(i, 2) != 0 do
-        :gl.color3f(1, 0.3, 0)
-      else
-        :gl.color3f(0, 0, 0)
-      end
-      :gl.vertex2f(x_bl, y_bl)
-      :gl.vertex2f(x_tl, y_tl)
-      :gl.vertex2f(x_tr, y_tr)
-      :gl.vertex2f(x_br, y_br)
-      :gl.'end'()
+    tach_label_step = @rpm_width/(@max_rpm/1000)
+
+    Enum.each(0..round(@max_rpm/1000), fn i ->
+        x = tach_label_step*i
+        x = unless i == 0, do: x - 6, else: x
+        draw_digit(i, x, 210, 12, own_state)
     end)
+    state.speed
+        |> round
+        |> Integer.to_string
+        |> String.pad_leading(3, "0")
+        |> draw_number(310, 290, 56, own_state)
+
+    state.rpm
+        |> round
+        |> Integer.to_string
+        |> String.pad_leading(4, "0")
+        |> draw_number(0, 190, 20, own_state)
 
     :gl.'begin'(:gl_const.gl_triangles)
     :gl.color3f(1.0, 1.0, 0.5)
-    :gl.vertex2f(10, 10)
-    :gl.vertex2f(10 + percent*460, 10)
-    :gl.vertex2f(10 + percent*460, 30)
+    :gl.vertex2f(100, 10)
+    :gl.vertex2f(100 + percent*360, 10)
+    :gl.vertex2f(100 + percent*360, 30)
     :gl.'end'()
     :ok
   end
 
-  defp render(%{canvas: canvas} = _state) do
-    draw()
+  defp draw_horizontal_blocks(x, x) do
+    :ok
+  end
+
+  defp draw_horizontal_blocks(max_x, min_x) do
+    width = max_x - min_x
+    colored_width = if width > 10, do: 10, else: width
+
+    {r, g, b} = color_for_block(@rpm_width, min_x)
+    :gl.color3f(r, g, b)
+    :gl.vertex2f(min_x, 220)
+    :gl.vertex2f(min_x + colored_width, 220)
+    :gl.vertex2f(min_x + colored_width, 320)
+    :gl.vertex2f(min_x, 320)
+
+    next_min = min(max_x, min_x + colored_width + 2)
+    draw_horizontal_blocks(max_x, next_min)
+  end
+
+  defp color_for_block(max_x, min_x) do
+    rpm = (min_x/max_x) * @max_rpm
+    color_for_rpm(rpm)
+  end
+
+  defp color_for_rpm(rpm) when rpm > @step3 do
+    @color3
+  end
+
+  defp color_for_rpm(rpm) when rpm > @step2 do
+    mult = (rpm - @step2) / (@step3 - @step2)
+    interpolate_color(@color2, @color3, mult)
+  end
+
+  defp color_for_rpm(rpm) when rpm > @step1 do
+    mult = (rpm - @step1) / (@step2 - @step1)
+    interpolate_color(@color1, @color2, mult)
+  end
+
+  defp color_for_rpm(rpm) do
+    @color1
+  end
+
+  defp interpolate_color(c1, _c2, _p) when _p <= 0 do
+    c1
+  end
+
+  defp interpolate_color(_c1, c2, _p) when _p >= 1 do
+    c2
+  end
+
+  defp interpolate_color(c1, c2, p) do
+    {r1, g1, b1} = c1
+    {r2, g2, b2} = c2
+    {r1 + (r2 - r1) * p, g1 + (g2 - g1) * p, b1 + (b2 - b1) * p}
+  end
+
+  defp draw_number(<<>>, x, y, w, state) do
+    :ok
+  end
+
+  defp draw_number(n, x, y, w, state) do
+    rest = n |> String.slice(1..-1)
+    digit = n |> String.at(0) |> String.to_integer
+    draw_digit(digit, x, y, w, state)
+    draw_number(rest, x + w, y, w, state)
+  end
+
+  defp draw_digit(n, x, y, w, %{textures: textures} = _state) do
+    tex = Enum.at(textures, n)
+    h = (w/90)*122
+    :gl.enable(:gl_const.gl_texture_2d)
+    :gl.texParameterf(:gl_const.gl_texture_2d, :gl_const.gl_texture_min_filter, :gl_const.gl_linear)
+    :gl.texParameterf(:gl_const.gl_texture_2d, :gl_const.gl_texture_mag_filter, :gl_const.gl_linear)
+    :gl.bindTexture(:gl_const.gl_texture_2d(), elem(tex, 1))
+    :gl.'begin'(:gl_const.gl_quads)
+
+    maxx = 90/128
+    maxy = 122/128
+
+    # tl -> tr -> br -> bl
+    :gl.texCoord2f(0, 0)
+    :gl.vertex2f(x, y)
+    :gl.texCoord2f(maxx, 0)
+    :gl.vertex2f(x + w, y)
+    :gl.texCoord2f(maxx, maxy)
+    :gl.vertex2f(x + w, y - h)
+    :gl.texCoord2f(0, maxy)
+    :gl.vertex2f(x, y - h)
+    :gl.'end'()
+    :gl.disable(:gl_const.gl_texture_2d)
+  end
+
+  defp render(%{canvas: canvas} = state) do
+    draw(state)
     :wxGLCanvas.swapBuffers(canvas)
     :ok
   end
